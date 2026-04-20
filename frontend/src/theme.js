@@ -1,0 +1,15 @@
+export const THEME = {
+  primary: "#6366F1",
+  primaryDark: "#4F46E5",
+  background: "#FFFFFF",
+  surface: "#F8FAFC",
+  inputBg: "#F1F5F9",
+  border: "#E2E8F0",
+  textPrimary: "#0F172A",
+  textSecondary: "#64748B",
+  userBubble: "#6366F1",
+  botBubble: "#F1F5F9",
+  success: "#10B981",
+  error: "#EF4444",
+  white: "#FFFFFF",
+};

@@ -1,0 +1,20 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+.env
+
+# Large binary files (generated at runtime)
+faiss_index_combined.bin
+documents_combined.pkl
+analytics.db
+
+# Optional: any other large files
+*.bin
+*.pkl
+*.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
