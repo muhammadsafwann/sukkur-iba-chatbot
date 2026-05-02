@@ -12,3 +12,4 @@ numpy
 itsdangerous
 requests
 tqdm
+huggingface-hub

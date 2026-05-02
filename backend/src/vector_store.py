@@ -12,14 +12,13 @@ Usage:
 """
 
 import os
-import time
 import numpy as np
 import pandas as pd
 import pickle
-import requests
 import faiss
 from typing import List, Dict, Optional, Union
 from tqdm import tqdm
+from huggingface_hub import InferenceClient
 
 class VectorStore:
     """
@@ -34,11 +33,11 @@ class VectorStore:
         Requires HF_TOKEN environment variable.
         """
         self.model_name = model_name
-        self.api_url = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{model_name}"
         self.token = os.environ.get("HF_TOKEN")
         if not self.token:
             raise ValueError("HF_TOKEN environment variable not set. Get a free token at huggingface.co/settings/tokens")
-        self.headers = {"Authorization": f"Bearer {self.token}"}
+        # Use the official client with the correct, up-to-date endpoint.
+        self.client = InferenceClient(model=model_name, token=self.token)
         self.index = None
         self.documents = None  # DataFrame with original texts + metadata
         print(f"OK: Using Hugging Face embedding model: {model_name}")
@@ -46,37 +45,32 @@ class VectorStore:
     def _embed_batch(self, texts: List[str], batch_size: int = 32) -> List[np.ndarray]:
         """
         Send a batch of texts to the Hugging Face API.
+        Uses the official client which handles the correct API endpoint format.
         Returns a list of numpy arrays (each of dimension 384 for all-MiniLM-L6-v2).
         """
         all_embeddings = []
         # Process in smaller batches to avoid timeouts
         for i in tqdm(range(0, len(texts), batch_size), desc="Embedding batches", unit="batch"):
             batch = texts[i:i+batch_size]
-            payload = {"inputs": batch, "options": {"wait_for_model": True}}
+            # Retry logic for transient errors
             retries = 3
             for attempt in range(retries):
                 try:
-                    response = requests.post(self.api_url, headers=self.headers, json=payload, timeout=60)
-                    if response.status_code == 200:
-                        embeddings = response.json()
-                        # The API returns list of lists; convert to numpy
-                        # Handle single text case: sometimes returns a list of floats
-                        if isinstance(embeddings, list) and len(embeddings) > 0 and isinstance(embeddings[0], list):
-                            all_embeddings.extend([np.array(emb) for emb in embeddings])
-                        else:
-                            # Single text response
-                            all_embeddings.append(np.array(embeddings))
-                        break
-                    elif response.status_code == 503:
-                        # Model loading, wait
-                        time.sleep(2)
-                        continue
-                    else:
-                        raise Exception(f"API error {response.status_code}: {response.text}")
+                    # The official client method returns the embedding vector(s).
+                    # It can handle both a single string and a list of strings.
+                    embeddings = self.client.feature_extraction(batch)
+                    break
                 except Exception as e:
                     if attempt == retries - 1:
                         raise
                     time.sleep(2)
+            # The API returns a list of lists; convert to numpy.
+            # It may return a single list for a single text.
+            if isinstance(embeddings, list) and len(embeddings) > 0 and isinstance(embeddings[0], list):
+                all_embeddings.extend([np.array(emb) for emb in embeddings])
+            else:
+                # Handle single text response case
+                all_embeddings.append(np.array(embeddings))
         return all_embeddings
 
     def generate_embeddings(self, texts: List[str]) -> np.ndarray:
@@ -144,14 +138,15 @@ class VectorStore:
         if self.index is None:
             raise ValueError("No index loaded. Call build_index() or load() first.")
 
-        # Embed query using API
-        query_embeddings = self._embed_batch([query])  # returns list of one numpy array
-        query_vec = query_embeddings[0]
+        # Use the official client for the query embedding.
+        # The client expects a string, not a list, for a single input.
+        query_embedding = self.client.feature_extraction(query)
+        query_vec = np.array(query_embedding).astype(np.float32).reshape(1, -1)
         # Normalize query vector
-        faiss.normalize_L2(query_vec.reshape(1, -1))
+        faiss.normalize_L2(query_vec)
 
         # Search
-        scores, indices = self.index.search(query_vec.reshape(1, -1), k)
+        scores, indices = self.index.search(query_vec, k)
 
         results = []
         for i, idx in enumerate(indices[0]):
@@ -172,8 +167,6 @@ class VectorStore:
             })
         return results
 
-
-# ----------------------------------------------------------------------
 # Example usage (run only if this file is executed directly)
 if __name__ == "__main__":
     from data_loader import FAQDataPreparator
